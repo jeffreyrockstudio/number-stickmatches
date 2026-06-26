@@ -1,10 +1,13 @@
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
-#include <stdio.h>
 #include <string>
 #include <vector>
+#include <getopt.h>
+#include <iostream>
 
 // #define PRINT_TESTS
 // #define TEST_ERROR
@@ -76,7 +79,9 @@ class num_base_t {
 
 class stick_num_t : public num_base_t {
     public:
-    stick_num_t(uint64_t _value) noexcept : num_base_t(_value) {}
+    stick_num_t(uint64_t _value) noexcept : num_base_t(0) {
+        set_value(_value);
+    }
 
     stick_num_t &set_value(uint64_t _value) noexcept {
         if (_value > 9 || _value < 0) return *this;
@@ -206,27 +211,39 @@ class stick_num_t : public num_base_t {
 class stick_digit_t : public num_base_t {
     using digit_vec = std::vector<stick_num_t>;
     digit_vec digits;
-    uint n_digit;
+    size_t n_digit;
 
     public:
-    stick_digit_t(uint64_t _value, uint _n_digit) : num_base_t(_value), n_digit(_n_digit) {
+    stick_digit_t(uint64_t _value, size_t _n_digit) : num_base_t(_value), n_digit(_n_digit) {
         parse_value(_value);
     }
 
-    stick_digit_t &set_value(uint64_t _value, uint _n_digit) {
+    stick_digit_t(uint64_t _value) : num_base_t(_value), n_digit(0) {
+        parse_value(_value, true);
+    }
+
+    stick_digit_t &set_value(uint64_t _value, size_t _n_digit) {
+        n_digit = _n_digit;
         num_base_t::set_value(_value);
         return parse_value(_value);
+    }
+
+    stick_digit_t &set_value(uint64_t _value) {
+        num_base_t::set_value(_value);
+        return parse_value(_value, true);
     }
 
     digit_vec get_digits() const noexcept {
         return digits;
     }
 
-    stick_digit_t &parse_value(uint64_t _value) {
+    stick_digit_t &parse_value(uint64_t _value, bool find_base_digit = false) {
         const std::string s = std::to_string(_value);
         size_t s_len = s.length();
 
-        if (n_digit < s_len) {
+        if (find_base_digit) {
+            n_digit = s_len;
+        } else if (n_digit < s_len) {
             std::string err = std::string("n_digit(") + std::to_string(n_digit) + ") < value(" + s + ").length()";
             throw std::logic_error(err);
         }
@@ -296,6 +313,8 @@ class stick_digit_t : public num_base_t {
         }
 
         for (int i = 0; i < 5; i++) {
+            printf("\t");
+
             for (const auto &v : bufs) {
                 printf("%s  ", v.at(i).c_str());
             }
@@ -306,7 +325,13 @@ class stick_digit_t : public num_base_t {
     }
 };
 
-int main() {
+void print_help_and_exit(char *argv[]) {
+    // print usage/help here if you have a function or message
+    std::cerr << "Usage: " << argv[0] << " [-b|--base N] [-h|--highest] [-l|--lowest] [-m|--moves N]\n";
+    std::exit(1);
+}
+
+int main(const int argc, char *argv[]) {
 #ifdef PRINT_TESTS
     for (int i = 0; i < 10; i++) {
         printf(" ===== %d:\n", i);
@@ -331,29 +356,94 @@ int main() {
     }
 #endif
 
-    printf("\n\n ========== BEGIN CHALLENGE ========== \n\n");
-    uint64_t r = 995;
-    uint64_t c = 994;
+    // args
+    // base number to start from
+    uint64_t base_number = 0;
+    bool base_number_set = false;
+    // find highest instead of lowest
+    bool highest_instead_of_lowest = true;
+    // number of moves
+    int moves = 2;
 
-    const stick_digit_t top{995, 3};
-    const uint64_t top_stick_count = top.stick_count();
+    // parse arguments
+    int option_index = 0;
+    static struct option long_options[] = {
+        {"base",    required_argument, 0, 'b'},
+        {"highest", no_argument,       0, 'h'},
+        {"lowest",  no_argument,       0, 'l'},
+        {"moves",   required_argument, 0, 'm'},
+        {"help",    no_argument,       0, '?'},
+        {0, 0, 0, 0}
+    };
 
-    // 2 moves meaning 4 changes in the stick position
-    const int N_CHANGES = 4;
-
-    while (c > 0) {
-        const stick_digit_t cs{c, 3};
-
-        if (top_stick_count == cs.stick_count() && top.diff_with(cs) == N_CHANGES) r = c;
-
-        c--;
+    int opt;
+    while ((opt = getopt_long(argc, argv, "b:hlm:?", long_options, &option_index)) != -1) {
+        switch (opt) {
+            case 'b':
+                base_number = std::stoull(optarg);
+                base_number_set = true;
+                break;
+            case 'h':
+                highest_instead_of_lowest = true;
+                break;
+            case 'l':
+                highest_instead_of_lowest = false;
+                break;
+            case 'm':
+                moves = std::stoi(optarg);
+                break;
+            case '?':
+            default:
+                print_help_and_exit(argv);
+        }
     }
 
-    printf("\n\n =============== RESULT =============== \n");
-    printf("> %ld <\n", r);
+    if (!base_number_set) print_help_and_exit(argv);
 
-    const stick_digit_t cs{r, 3};
+    printf(" ========== BEGIN CHALLENGE ========== \n");
+    printf("\tBase number: %ld\n", base_number);
+    printf("\tMode: find %s\n", highest_instead_of_lowest ? "highest" : "lowest");
+    printf("\tNumber of moves: %d\n\n", moves);
+
+    uint64_t result = base_number;
+    uint64_t c = base_number;
+
+    const stick_digit_t top{base_number};
+    top.print();
+
+    const uint64_t top_stick_count = top.stick_count();
+    const size_t digit_size = top.get_digits().size();
+    const int N_CHANGES = moves * 2;
+
+    const std::chrono::time_point start = std::chrono::high_resolution_clock::now();
+
+    if (!highest_instead_of_lowest) while (c > 0) {
+        c--;
+
+        const stick_digit_t cs{c, digit_size};
+        if (top_stick_count == cs.stick_count() && top.diff_with(cs) == N_CHANGES) result = c;
+    } else while (true) {
+        c++;
+
+        try {
+            const stick_digit_t cs{c, digit_size};
+            if (top_stick_count == cs.stick_count() && top.diff_with(cs) == N_CHANGES) result = c;
+        } catch (const std::logic_error &e) {
+            break;
+        }
+    }
+
+    const std::chrono::time_point end = std::chrono::high_resolution_clock::now();
+
+    printf("\n =============== RESULT =============== \n");
+    printf("\t\t> %ld <\n\n", result);
+
+    const stick_digit_t cs{result, digit_size};
     cs.print();
+
+    // nanos
+    const long long diff = (end - start).count();
+    printf("\n\nCalculated in %lld nanos (%lld micros) (%lld ms)\n", diff, diff / 1'000, diff / 1'000'000);
 
     return 0;
 }
