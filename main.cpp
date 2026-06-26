@@ -1,10 +1,13 @@
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <stdexcept>
 #include <stdio.h>
 #include <string>
 #include <vector>
 
 // #define PRINT_TESTS
+// #define TEST_ERROR
 
 /**
  * Index of stick positions to shape the numbers:
@@ -85,16 +88,70 @@ class stick_num_t : public num_base_t {
         return stick_positions.get_val_pos(value);
     }
 
-    const stick_num_t &print() const noexcept {
-        int pos = get_pos();
+    std::string build_line_horizontal(int idx) const noexcept {
+        constexpr char fmt[] = " %s ";
 
-        printf(" %s\n", longdash(cmpidx(pos,1)));
-        printf("%s", pipe(cmpidx(pos,0)));
-        printf(" %s\n", pipe(cmpidx(pos,2)));
-        printf(" %s\n", longdash(cmpidx(pos,3)));
-        printf("%s", pipe(cmpidx(pos,4)));
-        printf(" %s\n", pipe(cmpidx(pos,6)));
-        printf(" %s\n", longdash(cmpidx(pos,5)));
+        int pos = get_pos();
+        std::string buf;
+        buf.resize(8);
+
+        snprintf(buf.data(), buf.size(),
+                fmt,
+                longdash(cmpidx(pos,idx)));
+
+        return buf;
+    }
+
+    std::string build_line_vertical(int idx_left, int idx_right) const noexcept {
+        constexpr char fmt[] = "%s %s";
+
+        int pos = get_pos();
+        std::string buf;
+        buf.resize(8);
+
+        snprintf(buf.data(), buf.size(),
+                fmt, 
+                pipe(cmpidx(pos,idx_left)),
+                pipe(cmpidx(pos,idx_right)));
+
+        return buf;
+    }
+
+    std::vector<std::string> get_print_lines() const noexcept {
+        std::vector<std::string> lines;
+        lines.reserve(5);
+
+        lines.emplace_back(build_line_horizontal(1));
+        lines.emplace_back(build_line_vertical(0, 2));
+        lines.emplace_back(build_line_horizontal(3));
+        lines.emplace_back(build_line_vertical(4, 6));
+        lines.emplace_back(build_line_horizontal(5));
+
+        return lines;
+    }
+
+    std::string get_print_buf() const noexcept {
+        int pos = get_pos();
+        std::string buf;
+        buf.resize(32);
+
+        snprintf(buf.data(), buf.size(),
+                " %s \n%s %s\n %s \n%s %s\n %s ",
+                longdash(cmpidx(pos,1)),
+                pipe(cmpidx(pos,0)),
+                pipe(cmpidx(pos,2)),
+                longdash(cmpidx(pos,3)),
+                pipe(cmpidx(pos,4)),
+                pipe(cmpidx(pos,6)),
+                longdash(cmpidx(pos,5)));
+
+        return buf;
+    }
+
+    const stick_num_t &print() const noexcept {
+        std::string buf = get_print_buf();
+
+        printf("%s\n", buf.c_str());
 
         return *this;
     }
@@ -149,13 +206,14 @@ class stick_num_t : public num_base_t {
 class stick_digit_t : public num_base_t {
     using digit_vec = std::vector<stick_num_t>;
     digit_vec digits;
+    uint n_digit;
 
     public:
-    stick_digit_t(uint64_t _value) noexcept : num_base_t(_value) {
+    stick_digit_t(uint64_t _value, uint _n_digit) : num_base_t(_value), n_digit(_n_digit) {
         parse_value(_value);
     }
 
-    stick_digit_t &set_value(uint64_t _value) noexcept {
+    stick_digit_t &set_value(uint64_t _value, uint _n_digit) {
         num_base_t::set_value(_value);
         return parse_value(_value);
     }
@@ -164,9 +222,22 @@ class stick_digit_t : public num_base_t {
         return digits;
     }
 
-    stick_digit_t &parse_value(uint64_t _value) noexcept {
-        digits.clear();
+    stick_digit_t &parse_value(uint64_t _value) {
         const std::string s = std::to_string(_value);
+        size_t s_len = s.length();
+
+        if (n_digit < s_len) {
+            std::string err = std::string("n_digit(") + std::to_string(n_digit) + ") < value(" + s + ").length()";
+            throw std::logic_error(err);
+        }
+
+        digits.clear();
+
+        if (int64_t prepend_zeroes = (int64_t)n_digit - s_len; prepend_zeroes > 0) {
+            for (int64_t i = 0; i < prepend_zeroes; i++) {
+                digits.emplace_back(0);
+            }
+        }
 
         for (const auto c : s) {
             const char v[2] = {c, '\0'};
@@ -217,6 +288,22 @@ class stick_digit_t : public num_base_t {
 
         return c;
     }
+
+    const stick_digit_t &print() const noexcept {
+        std::vector<std::vector<std::string>> bufs;
+        for (const stick_num_t &n : digits) {
+            bufs.emplace_back(n.get_print_lines());
+        }
+
+        for (int i = 0; i < 5; i++) {
+            for (const auto &v : bufs) {
+                printf("%s  ", v.at(i).c_str());
+            }
+            printf("\n");
+        }
+
+        return *this;
+    }
 };
 
 int main() {
@@ -236,8 +323,11 @@ int main() {
 
     for (int i = 1000; i < 1010; i++) {
         printf(" ===== digits 999x%d: ", i);
-        stick_digit_t s(i);
-        printf("%ld\n %d stick count: %ld\n =====\n", s.diff_with(999), i, s.stick_count());
+        stick_digit_t s(i, 4);
+        printf("%ld\n %d stick count: %ld\n =====\n", s.diff_with({999, 4}), i, s.stick_count());
+#ifdef TEST_ERROR
+        stick_digit_t s2(i, 3);
+#endif
     }
 #endif
 
@@ -245,14 +335,14 @@ int main() {
     uint64_t r = 995;
     uint64_t c = 994;
 
-    const stick_digit_t top{995};
+    const stick_digit_t top{995, 3};
     const uint64_t top_stick_count = top.stick_count();
 
     // 2 moves meaning 4 changes in the stick position
     const int N_CHANGES = 4;
 
     while (c > 0) {
-        const stick_digit_t cs{c};
+        const stick_digit_t cs{c, 3};
 
         if (top_stick_count == cs.stick_count() && top.diff_with(cs) == N_CHANGES) r = c;
 
@@ -260,7 +350,10 @@ int main() {
     }
 
     printf("\n\n =============== RESULT =============== \n");
-    printf("%ld\n", r);
+    printf("> %ld <\n", r);
+
+    const stick_digit_t cs{r, 3};
+    cs.print();
 
     return 0;
 }
